@@ -8,6 +8,18 @@ const useRef = React.useRef;
 
 /** context */
 const GameContext = React.createContext({});
+/** enum */
+const GAME_MODE = {
+  ENDLESS:0, // default
+  SURVIVE:1,
+  TIMELIMIT:2,
+}
+const MODAL_TYPE = {
+  NONE:0,
+  SETTING:1,
+  GAMEOVER:2,
+  TIMEOUT:3,
+}
 
 /** function components */
 
@@ -21,9 +33,11 @@ function App() {
   const [index, setIndex] = useState(0)
   const [showGuide, setShowGuide] = useState(localStorage.getItem("dot-game-guidance-finish"))
   const [mode, setMode] = useState(0)
-  const [openSetting, setOpenSetting] = useState(false)
+  const [openModal, setOpenModal] = useState(MODAL_TYPE.NONE)
   const [hp, setHp] = useState(100)
-  const [timeout, setTimeout] = useState(null)
+  const [sound, setSound] = useState(true)
+  const [time, setTime] = useState(0)
+  const [getHighest, setGetHighest] = useState(false)
 
   const updateDuring = () => {
     const boardRect = getElementRect("board");
@@ -39,14 +53,42 @@ function App() {
     setScore(0);
     setDots([]);
     setIndex(0);
+    setTime(mode===GAME_MODE.TIMELIMIT?10:0);
     setCreateDotIntervalID(null);
   }
 
   const changeMode = (m) => {
-    setMode(m)
     initGame()
+    setMode(m)
   }
+    
+  const addScore = (add) => {
+    setScore(score=>score+add<=0?0:score+add)
+  }
+    
+  useEffect(() => {
+    // init game when change mode
+    initGame();
+  }, [mode])
 
+  useEffect(() => {
+    // game finish when time=0 in time limit mode
+      if (start && mode===GAME_MODE.TIMELIMIT && time <= 0) {
+        setStart(false);
+        setGetHighest(updateRecord(score, GAME_MODE.TIMELIMIT));
+        setOpenModal(MODAL_TYPE.TIMEOUT);
+      }
+  }, [time])
+
+  useEffect(() => {
+    // game finish when hp=0 in survive mode
+      if (start && mode===GAME_MODE.SURVIVE && score === 0 && time>0) {
+        setStart(false);
+        setGetHighest(updateRecord(score, GAME_MODE.TIMELIMIT));
+        setOpenModal(MODAL_TYPE.GAMEOVER);
+      }
+  }, [score])
+    
   useEffect(()=>{
     if (start) {
       if (!createDotIntervalID) {
@@ -63,10 +105,7 @@ function App() {
       setDuration(0);
     }
   }, [start,speed])
-  
-  const addScore=(add)=> {
-    setScore(score=>score+add)
-  }
+
   
   return (
     <GameContext.Provider
@@ -78,7 +117,6 @@ function App() {
         duration,
         setSpeed,
         addScore,
-        setCreateDotIntervalID,
         dots,
         setDots,
         index,
@@ -87,13 +125,19 @@ function App() {
         initGame,
         mode,
         setMode:changeMode,
-        openSetting,
-        setOpenSetting,
+        openSetting: openModal,
+        setOpenModal,
         hp,
-        setHp
+        setHp,
+        time,
+        setTime,
+        sound,
+        setSound
         }}
     >
-      {openSetting && <SettingModal />}
+      {openModal===MODAL_TYPE.SETTING && <SettingModal />}
+      {openModal === MODAL_TYPE.GAMEOVER && <GameOverDialog getHighest={getHighest}/>}
+      {openModal === MODAL_TYPE.TIMEOUT && <GameFinishDialog getHighest={getHighest}/>}
       {!showGuide && <GuideDialog />}
         <Header />
       <Board/>
@@ -108,22 +152,22 @@ function Header(){
     <div id="header" >
       <div className="header-line" >
        <Score />
-        <StartButton />
+        <ToolBar />
       </div>
        <SpeedSlider />
     </div>
   );
 }
 
-// click to start game/end game
-function StartButton(){
-  const {start,setStart,openSetting,setOpenSetting} = useContext(GameContext);
+// tool bar with button click to start game/end game and setting button
+function ToolBar(){
+  const {start,setStart,openSetting,setOpenModal} = useContext(GameContext);
   const onStartClick=()=>{
     setStart(start=>!start)
   }
   const onSettingClick=()=>{
     setStart(false)
-    setOpenSetting(true)
+    setOpenModal(MODAL_TYPE.SETTING)
   }
   return (
     <div>
@@ -149,7 +193,9 @@ function SpeedSlider(){
   // start to get mouse position for slider
   const handleMouseDown=(e)=>{
     e.stopPropagation();
-    e.preventDefault();
+    if(e.cancelable){
+        e.preventDefault();
+    }
     ['mouseup', 'touchend'].forEach(e => window.addEventListener(e, handleMouseUp));
     ['mousemove', 'touchmove'].forEach(e => window.addEventListener(e, handleWindowMouseMove));
   }
@@ -157,7 +203,9 @@ function SpeedSlider(){
   // finish to get mouse position for slider
   const handleMouseUp=(e)=>{
     e.stopPropagation();
-    e.preventDefault();
+    if(e.cancelable){
+        e.preventDefault();
+    }
     ['mousemove', 'touchmove'].forEach(e => window.removeEventListener(e, handleWindowMouseMove));
     ['mouseup', 'touchend'].forEach(e => window.removeEventListener(e, handleMouseUp));
   }
@@ -195,9 +243,10 @@ function SpeedSlider(){
   }, [blockEl,start]);
   
   return (
-    <div >
+    <div className={start?"locked":""}>
       <div　
         id="slider-block" 
+        
         ref={blockEl}
         style={{"left":left}}
       >
@@ -216,7 +265,7 @@ function Board(){
     setSpeed,
         dots,
         setDots,
-        index,mode,setHp
+        index,mode,setHp,setTime
         } = useContext(GameContext);
 
   const isMounted = useRef(null);
@@ -230,6 +279,7 @@ function Board(){
   
   useEffect(()=>{
     if (index > 0 && setDots) {
+      mode === GAME_MODE.TIMELIMIT ? setTime(t => t - 1) : setTime(t => t + 1);
       const boardRect = getElementRect("board");
       if (boardRect.width > 0) {
         const dot = createRandomDot(index, boardRect.width);
@@ -260,6 +310,7 @@ function Board(){
     <div id="board" ref={isMounted}>
       <PauseFace />
       {mode === 1 && <Hp />}
+      <Time />
       <div>
         {Object.entries(dots).map(([id, dot]) => <div key={id}>{dot}</div>)}
       </div>
@@ -273,6 +324,11 @@ function Hp(){
   return <h1 id="hp" >{hp}</h1>;
 }
 
+// show time pass in endless/survive mode, show time last in time-limit mode
+function Time(){
+  const {time} = useContext(GameContext);
+  return <h1 id="time" >{covertSecondToTime(time)}</h1>;
+} 
 // mask show when game is paused
 function PauseFace() {
     const {start,setStart} = useContext(GameContext);
@@ -281,7 +337,7 @@ function PauseFace() {
 }
 
 function Dot({ index,size,left }) {
-  const { start, addScore,duration } = useContext(GameContext);
+  const { start,sound, addScore,duration } = useContext(GameContext);
   const [disabled, setDisabled] = useState(false);
   const [style, setStyle] = useState(style);
   const [point, setPoint] = useState(0);
@@ -289,7 +345,7 @@ function Dot({ index,size,left }) {
   const isMounted = useRef(false);
   const clickAndTakeScore = () => {
     if (start) {
-      audio?.play&&audio.play();
+      sound && audio?.play &&audio.play();
       // When touched or clicked, the dot disappear and the score be increased
       addScore(point)
       setDisabled(true)
@@ -334,9 +390,10 @@ function Dot({ index,size,left }) {
   );
 }
 
-// guidence of game
+// setting modal
 function SettingModal() {
-  const {mode,setMode,setOpenSetting} = useContext(GameContext);
+
+  const {mode,sound,setMode,setOpenModal,setSound} = useContext(GameContext);
   const style1 = {
     "width": `100%`,
     "height": `100%`,
@@ -348,12 +405,108 @@ function SettingModal() {
   return (
     <div  className="dialog-area">
       <div className="dialog">
-      <h>Setting</h>
+      <h1>Setting</h1>
       <div className="button-list">
-        <p>Game Mode</p>
-        <button onClick={() => {setMode(mode=>mode<2?mode+1:0) }}>{mode===0?"Endless Mode":mode===1?"Survive Mode":"Time Limit Mode" }</button>
+        <h2>Game Mode</h2>
+          <button onClick={() => { setMode(mode => mode < 2 ? mode + 1 : 0) }}>
+            {mode === GAME_MODE.ENDLESS ? "Endless Mode" : mode === GAME_MODE.SURVIVE ? "Survive Mode" : "Time Limit Mode"}
+          </button>
+        </div>
+          
+        {mode === GAME_MODE.ENDLESS ? <div><p>Game will never finish</p><p>and dots will fall down forever.</p></div>
+          :
+          mode === GAME_MODE.SURVIVE ?
+            <div>
+              <p>If you miss dots,</p>
+              <p>your HP will be cut.</p>
+              <p>The bigger the dot is,</p>
+              <p>When HP become 0,</p>
+              <p>GAME OVER.</p>
+            </div>
+            :
+            <div>
+              <p>Try to get highest score</p>
+              <p>in only 1 MINUTE.</p>
+            </div>
+        }
+        <div className="button-list">
+        <h2>Sound</h2>
+          <button className={"checkbox" } onClick={() => { setSound(s => !s) }}>
+            {sound ? "✔" : ""}
+          </button>
+        </div>
+      <button onClick={() => {setOpenModal(MODAL_TYPE.NONE) }}>Close</button>
       </div>
-      <button onClick={() => {setOpenSetting(false) }}>Close</button>
+      <div className="dialog-mask" style={style1}/>
+    </div>
+  )
+}
+
+// dialog shows when you lose game in survive mode
+function GameOverDialog({getHighest}) {
+  const {score,setStart,setOpenModal,initGame} = useContext(GameContext);
+  const style1 = {
+    "width": `100%`,
+    "height": `100%`,
+    "backgroundColor": "#000000",
+    "left": `0px`,
+    "top": `0px`,
+  }
+
+  return (
+    <div  className="dialog-area">
+      <div className="dialog">
+      <div>Oops! Game Over...</div>
+      <p>You get { score} points! Good try!</p>
+        {getHighest && <p>New Record!!</p>}
+      <p>Try again?</p>
+      <div className="button-list">
+          <button onClick={() => {
+            setOpenModal(MODAL_TYPE.NONE);
+            initGame();
+            setStart(true);
+          }}>Yes</button>
+          <button onClick={() => {
+            setOpenModal(MODAL_TYPE.NONE)
+            initGame()
+          }}>No</button>
+      </div>
+      </div>
+      <div className="dialog-mask" style={style1}/>
+    </div>
+  )
+}
+
+
+// dialog shows when you lose game in survive mode
+function GameFinishDialog({getHighest}) {
+  const { score, setStart, setOpenModal, initGame } = useContext(GameContext);
+  const style1 = {
+    "width": `100%`,
+    "height": `100%`,
+    "backgroundColor": "#000000",
+    "left": `0px`,
+    "top": `0px`,
+  }
+
+  return (
+    <div  className="dialog-area">
+      <div className="dialog">
+      <h1>Time is over!</h1>
+      <p>You get { score} points! Good try!</p>
+        {getHighest && <p>New Record!!</p>}
+      <p>Try again?</p>
+      <div className="button-list">
+          <button onClick={() => {
+            setOpenModal(MODAL_TYPE.NONE);
+            initGame();
+            setStart(true);
+          }}>Yes</button>
+          <button onClick={() => {
+            setOpenModal(MODAL_TYPE.NONE)
+            initGame()
+          }}>No</button>
+      </div>
       </div>
       <div className="dialog-mask" style={style1}/>
     </div>
@@ -363,7 +516,7 @@ function SettingModal() {
 // guidence of game
 function GuideDialog() {
   const [step, setStep] = useState(1);
-  const {setShowGuide,setStart,initGame} = useContext(GameContext);
+  const {setShowGuide,setStart,initGame,setSpeed} = useContext(GameContext);
   const maxSize = 2*(window.innerWidth > window.innerHeight ? window.innerWidth : window.innerHeight);
   const style1 = {
     "width": `100%`,
@@ -403,7 +556,8 @@ function GuideDialog() {
       <p>Just start Game by click [Start] button.</p>
       <div className="button-list">
           <button onClick={() => {
-            setStart(true)
+            setStart(true);
+            setSpeed(100);
             setStep(step => step + 1);
           }}>Ok</button>
         </div>
@@ -442,6 +596,7 @@ function GuideDialog() {
       <div className="button-list">
          <button onClick={() => {
             setStart(false)
+            setSpeed(10);
             setStep(step => step + 1);
           }}>Ok</button>
         </div>
@@ -518,7 +673,6 @@ function GuideDialog() {
           <button onClick={() => {
             hideGuige();
             setStep(step => step + 1);
-            initGame()
           }}>Yes</button>
         <button onClick={()=>setStep(step => step + 1)}>No</button>
         </div>
@@ -531,7 +685,10 @@ function GuideDialog() {
     <>
     <div className="dialog">
       <div className="button-list">
-        <button onClick={()=>setShowGuide(true)}>Let's Start!</button>
+          <button onClick={() => {
+            initGame();
+            setShowGuide(true);
+          }}>Let's Start!</button>
         </div>
     </div>
     <div className="dialog-mask" style={style1}/>
@@ -656,8 +813,22 @@ function getElementRect(id) {
     }
 }
 
+function covertSecondToTime(time) {
+  const m=`${(time%3600-time%60)/60}`
+  const s=`${time%60}`
+  return `${m<10?'0':''}${m}:${s<10?'0':''}${s}`
+}
 
-
+// update player record (only for survive mode and time-limit mode)
+function updateRecord(score,mode) {
+  const record = localStorage.getItem(`dot-game-history-${mode}`);
+  let getHighest = false;
+  if (!record || record < score) {
+    localStorage.setItem(`dot-game-history-${mode}`, score);
+    getHighest = true;
+  }
+  return getHighest;
+}
 
 
 
