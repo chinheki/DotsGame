@@ -2,9 +2,15 @@
 // where your node app starts
 
 // init project
-var express = require('express');
+import express from 'express';
+import sassMiddleware from 'node-sass-middleware';import path from 'path';
+import {fileURLToPath} from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// var express = require('express');
 var app = express();
-var sassMiddleware = require("node-sass-middleware");
+// var sassMiddleware = require("node-sass-middleware");
 
 app.use(sassMiddleware({
   src: __dirname + '/public',
